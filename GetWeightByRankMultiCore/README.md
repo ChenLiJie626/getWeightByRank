@@ -24,7 +24,11 @@ for r in range(getuserIdRank[prefix + k]):
 
 `prefix` is the sum of prior `lens` entries. The valid output column count is `sum(getuserIdRank)`, which is guaranteed to be no more than `8`; columns beyond that are zero-filled. Each rank count is greater than zero.
 
-The kernel runs with one block for this fixed-size sample and writes each concatenated output column by copying the matching `[384]` rank slice from global memory.
+Implementation notes:
+
+- The host tiling launches up to `DEFAULT_BLOCK_DIM` vector blocks, capped by `idxCount * 8`.
+- Each block owns complete `dstIndex` slices, so blocks never write the same output region.
+- For every owned `dstIndex`, the kernel builds the complete `[384, 8]` real and imaginary outputs in UB. It uses aligned contiguous `DataCopy` operations to load each source `[384, 8]` matrix from GM and to store each complete output matrix back to GM. The rank-column concatenation is performed inside UB with `LocalTensor::GetValue` / `SetValue`, avoiding per-element GM reads and writes.
 
 Build:
 
