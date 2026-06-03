@@ -1,27 +1,33 @@
 #!/bin/bash
-if [ -z "$BASE_LIBS_PATH" ]; then 
-  if [ -z "$ASCEND_HOME_PATH" ]; then 
-    if [ -z "$ASCEND_AICPU_PATH" ]; then 
-      echo "please set env."
-      exit 1
-    else
-      export ASCEND_HOME_PATH=$ASCEND_AICPU_PATH
-    fi
-  else 
-    export ASCEND_HOME_PATH=$ASCEND_HOME_PATH
-  fi
-else
+if [ -n "$BASE_LIBS_PATH" ]; then
   export ASCEND_HOME_PATH=$BASE_LIBS_PATH
+elif [ -n "$ASCEND_HOME_PATH" ]; then
+  export ASCEND_HOME_PATH=$ASCEND_HOME_PATH
+elif [ -n "$ASCEND_AICPU_PATH" ]; then
+  export ASCEND_HOME_PATH=$ASCEND_AICPU_PATH
+elif [ -d "$HOME/Ascend/ascend-toolkit/latest" ]; then
+  export ASCEND_HOME_PATH=$HOME/Ascend/ascend-toolkit/latest
+elif [ -d "/usr/local/Ascend/ascend-toolkit/latest" ]; then
+  export ASCEND_HOME_PATH=/usr/local/Ascend/ascend-toolkit/latest
+else
+  echo "please set env."
+  exit 1
 fi
 echo "using ASCEND_HOME_PATH: $ASCEND_HOME_PATH"
-script_path=$(realpath $(dirname $0))
+script_path=$(realpath "$(dirname "$0")")
 
+if [ -f "$ASCEND_HOME_PATH/bin/setenv.bash" ]; then
+  # opbuild needs toolkit libraries such as libregister.so on LD_LIBRARY_PATH.
+  source "$ASCEND_HOME_PATH/bin/setenv.bash"
+fi
+
+find "$script_path/scripts" "$script_path/cmake" -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
 
 mkdir -p build_out
 rm -rf build_out/*
 cd build_out
 
-opts=$(python3 $script_path/cmake/util/preset_parse.py $script_path/CMakePresets.json)
+opts=$(python3 "$script_path/cmake/util/preset_parse.py" "$script_path/CMakePresets.json")
 ENABLE_CROSS="-DENABLE_CROSS_COMPILE=True"
 ENABLE_BINARY="-DENABLE_BINARY_PACKAGE=True"
 cmake_version=$(cmake --version | grep "cmake version" | awk '{print $3}')
