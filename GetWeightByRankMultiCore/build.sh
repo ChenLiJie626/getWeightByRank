@@ -20,6 +20,7 @@ if [ -f "$ASCEND_HOME_PATH/bin/setenv.bash" ]; then
   # opbuild needs toolkit libraries such as libregister.so on LD_LIBRARY_PATH.
   source "$ASCEND_HOME_PATH/bin/setenv.bash"
 fi
+export ASCEND_OPP_PATH=${ASCEND_OPP_PATH:-$ASCEND_HOME_PATH/opp}
 
 find "$script_path/scripts" "$script_path/cmake" -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
 
@@ -48,6 +49,9 @@ cmake_run_package()
           rm -rf ./cust*.run && rm -rf ./cust*.run.json && exit 1;
       fi
       cmake --build . --target $target -j16
+      if [ $? -ne 0 ]; then exit 1; fi
+      ./cust*.run
+      if [ $? -ne 0 ]; then exit 1; fi
     fi
   fi
 }
@@ -76,9 +80,8 @@ then
       rm -rf ./cust*.run && rm -rf ./cust*.run.json && exit 1;
   fi
   if [ $target = "package" ]; then
-    if test -d ./op_kernel/binary ; then
-      ./cust*.run
-    fi
+    ./cust*.run
+    if [ $? -ne 0 ]; then exit 1; fi
   fi
   rm -rf ../kernel
 

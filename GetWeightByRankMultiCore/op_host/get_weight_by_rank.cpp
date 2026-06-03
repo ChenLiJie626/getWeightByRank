@@ -89,11 +89,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     tiling.set_idxCount(static_cast<uint32_t>(idxCount));
     tiling.set_totalUserEntries(static_cast<uint32_t>(totalUserEntries));
 
-    const uint64_t estimatedTasks = static_cast<uint64_t>(totalUserEntries) * INDEX_GROUP_WIDTH;
-    uint32_t blockDim = DEFAULT_BLOCK_DIM;
-    if (estimatedTasks > 0 && estimatedTasks < DEFAULT_BLOCK_DIM) {
-        blockDim = static_cast<uint32_t>(estimatedTasks);
-    }
+    uint32_t blockDim = 1;
     context->SetBlockDim(blockDim);
     context->SetTilingKey(0);
 

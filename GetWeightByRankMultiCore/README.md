@@ -13,16 +13,18 @@ Outputs:
 
 - `weightout_r`, `weightout_i`: `float`, shape `[idxCount * 8, 384, 8]`.
 
-For idx group `i`, user column `k`, and local index `t` in `[0, 7]`, the operator writes:
+For idx group `i`, user entry `k`, and local index `t` in `[0, 7]`, `getuserIdRank[prefix + k]` is the number of leading rank columns to copy for that user. These columns are concatenated into the output:
 
 ```text
-weightout_[i * 8 + t, row, prefix + k] =
-    weight_[getuserIds[prefix + k], getIdxs[i] * 8 + t, row, getuserIdRank[prefix + k]]
+rank_prefix = sum(getuserIdRank[:prefix + k])
+for r in range(getuserIdRank[prefix + k]):
+    weightout_[i * 8 + t, row, rank_prefix + r] =
+        weight_[getuserIds[prefix + k], getIdxs[i] * 8 + t, row, r]
 ```
 
-`prefix` is the sum of prior `lens` entries. The valid output column count is `sum(lens)`, which is guaranteed to be no more than `8`; columns beyond `sum(lens)` are zero-filled.
+`prefix` is the sum of prior `lens` entries. The valid output column count is `sum(getuserIdRank)`, which is guaranteed to be no more than `8`; columns beyond that are zero-filled. Each rank count is greater than zero.
 
-The vector kernel uses `DataCopyPad` with GM byte strides to gather one rank column from the `[384, 8]` source slice and scatter it into the output column.
+The kernel runs with one block for this fixed-size sample and writes each concatenated output column by copying the matching `[384]` rank slice from global memory.
 
 Build:
 
