@@ -13,16 +13,17 @@ Outputs:
 
 - `weightout_r`, `weightout_i`: `float`, shape `[idxCount * 8, 384, 8]`.
 
-For idx group `i`, user entry `k`, and local index `t` in `[0, 7]`, `getuserIdRank[prefix + k]` is the number of leading rank columns to copy for that user. These columns are concatenated into the output:
+For idx group `i`, user entry `k`, and local index `t` in `[0, 7]`, `getuserIdRank[user_offset + k]` is the number of leading rank columns to copy for that user. These columns are concatenated from column `0` inside each idx group:
 
 ```text
-rank_prefix = sum(getuserIdRank[:prefix + k])
-for r in range(getuserIdRank[prefix + k]):
+user_offset = sum(lens[:i])
+rank_prefix = sum(getuserIdRank[user_offset:user_offset + k])
+for r in range(getuserIdRank[user_offset + k]):
     weightout_[i * 8 + t, row, rank_prefix + r] =
-        weight_[getuserIds[prefix + k], getIdxs[i] * 8 + t, row, r]
+        weight_[getuserIds[user_offset + k], getIdxs[i] * 8 + t, row, r]
 ```
 
-`prefix` is the sum of prior `lens` entries. The valid output column count is `sum(getuserIdRank)`, which is guaranteed to be no more than `8`; columns beyond that are zero-filled. Each rank count is greater than zero.
+`user_offset` is the sum of prior `lens` entries and only selects the current group's user/rank slice. The output column prefix is local to the current idx group; the rank sum for each group is guaranteed to be no more than `8`, and columns beyond that local sum are zero-filled. Each rank count is greater than zero.
 
 Implementation notes:
 

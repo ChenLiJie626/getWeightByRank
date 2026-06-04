@@ -16,7 +16,7 @@ constexpr int64_t INDEX_COUNT = 136;
 constexpr int64_t ROWS = 384;
 constexpr int64_t RANKS = 8;
 constexpr int64_t IDX_COUNT = 3;
-constexpr int64_t TOTAL_USER_ENTRIES = 7;
+constexpr int64_t TOTAL_USER_ENTRIES = 10;
 constexpr int64_t OUT_COLS = 8;
 } // namespace
 

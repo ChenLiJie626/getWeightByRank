@@ -9,16 +9,15 @@ INDEX_COUNT = 136
 ROWS = 384
 RANKS = 8
 GET_IDXS = np.array([0, 2, 16], dtype=np.int32)
-LENS = np.array([2, 3, 2], dtype=np.int32)
-GET_USER_IDS = np.array([0, 2, 1, 3, 0, 2, 1], dtype=np.int32)
-GET_USER_RANKS = np.array([1, 2, 1, 1, 1, 1, 1], dtype=np.int32)
+LENS = np.array([3, 4, 3], dtype=np.int32)
+GET_USER_IDS = np.array([0, 2, 1, 1, 3, 0, 2, 2, 1, 3], dtype=np.int32)
+GET_USER_RANKS = np.array([1, 2, 1, 2, 1, 2, 1, 3, 1, 2], dtype=np.int32)
 OUT_COLS = 8
 
 
 def build_golden(weight: np.ndarray) -> np.ndarray:
     out = np.zeros((len(GET_IDXS) * RANKS, ROWS, OUT_COLS), dtype=np.float32)
     user_offset = 0
-    out_col = 0
     for i, idx_group in enumerate(GET_IDXS):
         cur_len = int(LENS[i])
         user_ids = GET_USER_IDS[user_offset:user_offset + cur_len]
@@ -26,12 +25,11 @@ def build_golden(weight: np.ndarray) -> np.ndarray:
         for local_index in range(RANKS):
             src_index = int(idx_group) * RANKS + local_index
             dst_index = i * RANKS + local_index
-            dst_col = out_col
+            dst_col = 0
             for user_id, rank_count in zip(user_ids, ranks):
                 for rank_offset in range(int(rank_count)):
                     out[dst_index, :, dst_col + rank_offset] = weight[int(user_id), src_index, :, rank_offset]
                 dst_col += int(rank_count)
-        out_col += int(np.sum(ranks))
         user_offset += cur_len
     return out
 
@@ -54,9 +52,13 @@ def main() -> None:
 
     build_golden(weight_r).tofile("output/golden_weightout_r.bin")
     build_golden(weight_i).tofile("output/golden_weightout_i.bin")
+    group_valid_cols = [
+        int(np.sum(GET_USER_RANKS[int(np.sum(LENS[:i])):int(np.sum(LENS[:i + 1]))]))
+        for i in range(len(GET_IDXS))
+    ]
     print(
         "Generate input and golden data success. "
-        f"userCount={USER_COUNT}, idxCount={len(GET_IDXS)}, validCols={int(np.sum(GET_USER_RANKS))}, "
+        f"userCount={USER_COUNT}, idxCount={len(GET_IDXS)}, validColsPerGroup={group_valid_cols}, "
         f"paddedCols={OUT_COLS}"
     )
 

@@ -76,7 +76,8 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
         return ge::GRAPH_FAILED;
     }
     const int64_t totalUserEntries = userIdsShape.GetDim(0);
-    if (totalUserEntries < 0 || totalUserEntries > OUTPUT_COLS) {
+    if (totalUserEntries < 0 ||
+        static_cast<uint64_t>(totalUserEntries) > static_cast<uint64_t>(idxCount) * OUTPUT_COLS) {
         return ge::GRAPH_FAILED;
     }
     if (!CheckOutputShape(outRShape, idxCount) ||

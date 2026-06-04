@@ -61,26 +61,20 @@ __aicore__ inline uint32_t GetRankCount(int32_t rankCount)
     return count < RANKS_PER_INDEX ? count : RANKS_PER_INDEX;
 }
 
-__aicore__ inline void AdvanceOffsets(__gm__ int32_t *lensGm, __gm__ int32_t *ranksGm,
-                                      uint32_t groupCount, uint32_t totalUserEntries,
-                                      uint32_t &userOffset, uint32_t &outputColOffset)
+__aicore__ inline uint32_t GetUserOffset(__gm__ int32_t *lensGm, uint32_t groupCount,
+                                         uint32_t totalUserEntries)
 {
-    userOffset = 0;
-    outputColOffset = 0;
+    uint32_t userOffset = 0;
     for (uint32_t i = 0; i < groupCount; ++i) {
         const int32_t rawLen = lensGm[i];
         const uint32_t currentLen = rawLen > 0 ? static_cast<uint32_t>(rawLen) : 0;
         const uint32_t remaining = userOffset < totalUserEntries ? totalUserEntries - userOffset : 0;
-        const uint32_t availableLen = currentLen < remaining ? currentLen : remaining;
-        for (uint32_t k = 0; k < availableLen; ++k) {
-            outputColOffset += GetRankCount(ranksGm[userOffset + k]);
-        }
         if (currentLen >= remaining) {
-            userOffset = totalUserEntries;
-        } else {
-            userOffset += currentLen;
+            return totalUserEntries;
         }
+        userOffset += currentLen;
     }
+    return userOffset;
 }
 
 __aicore__ inline void ProcessDstIndex(GlobalTensor<float> &weightR, GlobalTensor<float> &weightI,
@@ -109,9 +103,8 @@ __aicore__ inline void ProcessDstIndex(GlobalTensor<float> &weightR, GlobalTenso
     ClearLocalMatrix(outILocal);
     PipeBarrier<PIPE_ALL>();
 
-    uint32_t userOffset = 0;
+    const uint32_t userOffset = GetUserOffset(lensGm, groupIndex, totalUserEntries);
     uint32_t outputColOffset = 0;
-    AdvanceOffsets(lensGm, ranksGm, groupIndex, totalUserEntries, userOffset, outputColOffset);
 
     const int32_t rawLen = lensGm[groupIndex];
     const uint32_t currentLen = rawLen > 0 ? static_cast<uint32_t>(rawLen) : 0;
