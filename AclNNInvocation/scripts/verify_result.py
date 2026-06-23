@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
+import os
 import sys
 from typing import Tuple
 
 import numpy as np
 
 
-GET_IDXS_LEN = 3
-ROWS = 384
-RANKS = 8
-OUT_COLS = 8
+ROWS = 256
 
 
-def check(name: str, actual_path: str, golden_path: str, shape: Tuple[int, int, int],
+def check(name: str, actual_path: str, golden_path: str, shape: Tuple[int, ...],
           atol: float, rtol: float) -> bool:
     actual = np.fromfile(actual_path, dtype=np.float32).reshape(shape)
     golden = np.fromfile(golden_path, dtype=np.float32).reshape(shape)
@@ -28,7 +26,11 @@ def check(name: str, actual_path: str, golden_path: str, shape: Tuple[int, int, 
 
 
 def main() -> int:
-    shape = (GET_IDXS_LEN * RANKS, ROWS, OUT_COLS)
+    elem_count = os.path.getsize("output/golden_weightout_r.bin") // np.dtype(np.float32).itemsize
+    if elem_count % ROWS != 0:
+        print(f"Invalid golden element count: {elem_count}")
+        return 1
+    shape = (elem_count // ROWS, ROWS)
     weightout_r_ok = check(
         "weightout_r",
         "output/output_weightout_r.bin",

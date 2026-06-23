@@ -11,13 +11,13 @@
 #include "op_runner.h"
 
 namespace {
-constexpr int64_t USER_COUNT = 4;
+constexpr int64_t USER_COUNT = 30;
 constexpr int64_t INDEX_COUNT = 136;
-constexpr int64_t ROWS = 384;
+constexpr int64_t ROWS = 256;
 constexpr int64_t RANKS = 8;
-constexpr int64_t IDX_COUNT = 3;
-constexpr int64_t TOTAL_USER_ENTRIES = 10;
-constexpr int64_t OUT_COLS = 8;
+constexpr int64_t IDX_COUNT = 17;
+constexpr int64_t TOTAL_USER_ENTRIES = 34;
+constexpr int64_t OUT_ROWS = 2;
 } // namespace
 
 bool g_isDevice = false;
@@ -25,10 +25,10 @@ int deviceId = 0;
 
 OperatorDesc CreateOpDesc()
 {
-    std::vector<int64_t> weightShape{USER_COUNT, INDEX_COUNT, ROWS, RANKS};
+    std::vector<int64_t> weightShape{USER_COUNT, INDEX_COUNT, RANKS, ROWS};
     std::vector<int64_t> idxShape{IDX_COUNT};
     std::vector<int64_t> userListShape{TOTAL_USER_ENTRIES};
-    std::vector<int64_t> outputShape{IDX_COUNT * RANKS, ROWS, OUT_COLS};
+    std::vector<int64_t> outputShape{IDX_COUNT * RANKS, OUT_ROWS, ROWS};
     aclFormat format = ACL_FORMAT_ND;
     OperatorDesc opDesc;
     opDesc.AddInputTensorDesc(ACL_FLOAT, weightShape.size(), weightShape.data(), format);

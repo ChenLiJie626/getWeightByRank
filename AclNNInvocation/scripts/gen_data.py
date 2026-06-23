@@ -4,19 +4,52 @@ import os
 import numpy as np
 
 
-USER_COUNT = 4
 INDEX_COUNT = 136
-ROWS = 384
+ROWS = 256
 RANKS = 8
-GET_IDXS = np.array([0, 2, 16], dtype=np.int32)
-LENS = np.array([3, 4, 3], dtype=np.int32)
-GET_USER_IDS = np.array([0, 2, 1, 1, 3, 0, 2, 2, 1, 3], dtype=np.int32)
-GET_USER_RANKS = np.array([1, 2, 1, 2, 1, 2, 1, 3, 1, 2], dtype=np.int32)
-OUT_COLS = 8
+SCENARIO_SCALE_USER30_IDX17_LENS2 = "scale_user30_idx17_lens2"
+SCENARIO_PREFIX_OUTCOL_REGRESSION = "prefix_outcol_regression"
+SCENARIO = os.getenv("GET_WEIGHT_SCENARIO", SCENARIO_SCALE_USER30_IDX17_LENS2)
+
+
+def build_scenario(name: str):
+    if name == SCENARIO_SCALE_USER30_IDX17_LENS2:
+        user_count = 30
+        get_idxs = np.arange(17, dtype=np.int32)
+        lens = np.full(len(get_idxs), 2, dtype=np.int32)
+        total_user_entries = int(np.sum(lens))
+        user_ids = (np.arange(total_user_entries, dtype=np.int32) % user_count).astype(np.int32)
+        user_ranks = np.ones(total_user_entries, dtype=np.int32)
+        return user_count, get_idxs, lens, user_ids, user_ranks
+    if name == SCENARIO_PREFIX_OUTCOL_REGRESSION:
+        user_count = 4
+        get_idxs = np.array([0, 2, 16], dtype=np.int32)
+        lens = np.array([3, 4, 3], dtype=np.int32)
+        user_ids = np.array([0, 2, 1, 1, 3, 0, 2, 2, 1, 3], dtype=np.int32)
+        user_ranks = np.array([1, 2, 1, 2, 1, 2, 1, 3, 1, 2], dtype=np.int32)
+        return user_count, get_idxs, lens, user_ids, user_ranks
+    raise ValueError(f"Unknown GET_WEIGHT_SCENARIO: {name}")
+
+
+USER_COUNT, GET_IDXS, LENS, GET_USER_IDS, GET_USER_RANKS = build_scenario(SCENARIO)
+
+
+def get_group_valid_rows() -> list[int]:
+    group_valid_rows = []
+    user_offset = 0
+    for cur_len in LENS:
+        next_offset = user_offset + int(cur_len)
+        group_valid_rows.append(int(np.sum(GET_USER_RANKS[user_offset:next_offset])))
+        user_offset = next_offset
+    return group_valid_rows
+
+
+GROUP_VALID_ROWS = get_group_valid_rows()
+OUTPUT_ROWS = max(GROUP_VALID_ROWS)
 
 
 def build_golden(weight: np.ndarray) -> np.ndarray:
-    out = np.zeros((len(GET_IDXS) * RANKS, ROWS, OUT_COLS), dtype=np.float32)
+    out = np.zeros((len(GET_IDXS) * RANKS, OUTPUT_ROWS, ROWS), dtype=np.float32)
     user_offset = 0
     for i, idx_group in enumerate(GET_IDXS):
         cur_len = int(LENS[i])
@@ -27,8 +60,9 @@ def build_golden(weight: np.ndarray) -> np.ndarray:
             dst_index = i * RANKS + local_index
             dst_col = 0
             for user_id, rank_count in zip(user_ids, ranks):
-                for rank_offset in range(int(rank_count)):
-                    out[dst_index, :, dst_col + rank_offset] = weight[int(user_id), src_index, :, rank_offset]
+                copy_rows = max(0, min(int(rank_count), OUTPUT_ROWS - dst_col))
+                for rank_offset in range(copy_rows):
+                    out[dst_index, dst_col + rank_offset, :] = weight[int(user_id), src_index, rank_offset, :]
                 dst_col += int(rank_count)
         user_offset += cur_len
     return out
@@ -39,7 +73,7 @@ def main() -> None:
     os.makedirs("input", exist_ok=True)
     os.makedirs("output", exist_ok=True)
 
-    shape = (USER_COUNT, INDEX_COUNT, ROWS, RANKS)
+    shape = (USER_COUNT, INDEX_COUNT, RANKS, ROWS)
     weight_r = rng.uniform(-1.0, 1.0, size=shape).astype(np.float32)
     weight_i = rng.uniform(-1.0, 1.0, size=shape).astype(np.float32)
 
@@ -52,14 +86,12 @@ def main() -> None:
 
     build_golden(weight_r).tofile("output/golden_weightout_r.bin")
     build_golden(weight_i).tofile("output/golden_weightout_i.bin")
-    group_valid_cols = [
-        int(np.sum(GET_USER_RANKS[int(np.sum(LENS[:i])):int(np.sum(LENS[:i + 1]))]))
-        for i in range(len(GET_IDXS))
-    ]
     print(
         "Generate input and golden data success. "
-        f"userCount={USER_COUNT}, idxCount={len(GET_IDXS)}, validColsPerGroup={group_valid_cols}, "
-        f"paddedCols={OUT_COLS}"
+        f"scenario={SCENARIO}, userCount={USER_COUNT}, idxCount={len(GET_IDXS)}, "
+        f"lensAvg={float(np.mean(LENS)):.2f}, "
+        f"validRowsPerGroup={GROUP_VALID_ROWS}, "
+        f"outputRows={OUTPUT_ROWS}"
     )
 
 
