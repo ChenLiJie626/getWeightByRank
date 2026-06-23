@@ -3,7 +3,9 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <fstream>
 #include <iostream>
+#include <string>
 #include <vector>
 
 #include "acl/acl.h"
@@ -11,24 +13,140 @@
 #include "op_runner.h"
 
 namespace {
-constexpr int64_t USER_COUNT = 30;
 constexpr int64_t INDEX_COUNT = 136;
 constexpr int64_t ROWS = 256;
 constexpr int64_t RANKS = 8;
-constexpr int64_t IDX_COUNT = 17;
-constexpr int64_t TOTAL_USER_ENTRIES = 34;
-constexpr int64_t OUT_ROWS = 2;
+
+struct SampleShape {
+    int64_t userCount;
+    int64_t idxCount;
+    int64_t totalUserEntries;
+    int64_t totalOutputRows;
+};
+
+bool GetFileSize(const std::string &path, size_t &fileSize)
+{
+    struct stat statBuf;
+    if (stat(path.c_str(), &statBuf) != 0 || statBuf.st_size < 0) {
+        ERROR_LOG("Get file size failed. path=%s", path.c_str());
+        return false;
+    }
+    fileSize = static_cast<size_t>(statBuf.st_size);
+    return true;
+}
+
+bool GetElementCount(const std::string &path, size_t elemSize, int64_t &count)
+{
+    size_t fileSize = 0;
+    if (!GetFileSize(path, fileSize) || elemSize == 0 || fileSize % elemSize != 0) {
+        ERROR_LOG("Invalid file size. path=%s, elemSize=%zu", path.c_str(), elemSize);
+        return false;
+    }
+    count = static_cast<int64_t>(fileSize / elemSize);
+    return true;
+}
+
+bool ReadInt32File(const std::string &path, std::vector<int32_t> &values)
+{
+    int64_t count = 0;
+    if (!GetElementCount(path, sizeof(int32_t), count)) {
+        return false;
+    }
+    values.resize(static_cast<size_t>(count));
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        ERROR_LOG("Open int32 file failed. path=%s", path.c_str());
+        return false;
+    }
+    in.read(reinterpret_cast<char *>(values.data()), static_cast<std::streamsize>(values.size() * sizeof(int32_t)));
+    if (!in) {
+        ERROR_LOG("Read int32 file failed. path=%s", path.c_str());
+        return false;
+    }
+    return true;
+}
+
+int64_t NormalizeRankCount(int32_t rankCount)
+{
+    if (rankCount <= 0) {
+        return 0;
+    }
+    return rankCount < RANKS ? rankCount : RANKS;
+}
+
+bool BuildSampleShape(SampleShape &shape)
+{
+    int64_t weightElems = 0;
+    int64_t weightIElems = 0;
+    int64_t idxCount = 0;
+    int64_t userIdCount = 0;
+    int64_t rankCount = 0;
+    if (!GetElementCount("../input/input_weight_r.bin", sizeof(float), weightElems) ||
+        !GetElementCount("../input/input_weight_i.bin", sizeof(float), weightIElems) ||
+        !GetElementCount("../input/input_get_idxs.bin", sizeof(int32_t), idxCount) ||
+        !GetElementCount("../input/input_user_ids.bin", sizeof(int32_t), userIdCount) ||
+        !GetElementCount("../input/input_user_ranks.bin", sizeof(int32_t), rankCount)) {
+        return false;
+    }
+    const int64_t elemsPerUser = INDEX_COUNT * RANKS * ROWS;
+    if (weightElems <= 0 || weightElems != weightIElems || weightElems % elemsPerUser != 0 ||
+        idxCount <= 0 || userIdCount != rankCount) {
+        ERROR_LOG("Invalid generated input sizes");
+        return false;
+    }
+
+    std::vector<int32_t> lens;
+    std::vector<int32_t> ranks;
+    if (!ReadInt32File("../input/input_lens.bin", lens) ||
+        !ReadInt32File("../input/input_user_ranks.bin", ranks)) {
+        return false;
+    }
+    if (static_cast<int64_t>(lens.size()) != idxCount ||
+        static_cast<int64_t>(ranks.size()) != userIdCount) {
+        ERROR_LOG("Input vector sizes do not match idx/user metadata");
+        return false;
+    }
+
+    int64_t userOffset = 0;
+    int64_t totalOutputRows = 0;
+    for (int64_t i = 0; i < idxCount; ++i) {
+        const int64_t currentLen = lens[static_cast<size_t>(i)] > 0 ? lens[static_cast<size_t>(i)] : 0;
+        if (userOffset + currentLen > userIdCount) {
+            ERROR_LOG("lens exceeds user/rank list size");
+            return false;
+        }
+        int64_t currentRows = 0;
+        for (int64_t k = 0; k < currentLen; ++k) {
+            currentRows += NormalizeRankCount(ranks[static_cast<size_t>(userOffset + k)]);
+        }
+        totalOutputRows += currentRows * RANKS;
+        userOffset += currentLen;
+    }
+    if (userOffset != userIdCount || totalOutputRows <= 0) {
+        ERROR_LOG("Invalid dynamic output rows. consumed=%ld, userIdCount=%ld, totalOutputRows=%ld",
+                  userOffset, userIdCount, totalOutputRows);
+        return false;
+    }
+
+    shape.userCount = weightElems / elemsPerUser;
+    shape.idxCount = idxCount;
+    shape.totalUserEntries = userIdCount;
+    shape.totalOutputRows = totalOutputRows;
+    INFO_LOG("Resolved sample shape: userCount=%ld, idxCount=%ld, totalUserEntries=%ld, totalOutputRows=%ld",
+             shape.userCount, shape.idxCount, shape.totalUserEntries, shape.totalOutputRows);
+    return true;
+}
 } // namespace
 
 bool g_isDevice = false;
 int deviceId = 0;
 
-OperatorDesc CreateOpDesc()
+OperatorDesc CreateOpDesc(const SampleShape &sampleShape)
 {
-    std::vector<int64_t> weightShape{USER_COUNT, INDEX_COUNT, RANKS, ROWS};
-    std::vector<int64_t> idxShape{IDX_COUNT};
-    std::vector<int64_t> userListShape{TOTAL_USER_ENTRIES};
-    std::vector<int64_t> outputShape{IDX_COUNT * RANKS, OUT_ROWS, ROWS};
+    std::vector<int64_t> weightShape{sampleShape.userCount, INDEX_COUNT, RANKS, ROWS};
+    std::vector<int64_t> idxShape{sampleShape.idxCount};
+    std::vector<int64_t> userListShape{sampleShape.totalUserEntries};
+    std::vector<int64_t> outputShape{sampleShape.totalOutputRows, ROWS};
     aclFormat format = ACL_FORMAT_ND;
     OperatorDesc opDesc;
     opDesc.AddInputTensorDesc(ACL_FLOAT, weightShape.size(), weightShape.data(), format);
@@ -125,7 +243,12 @@ bool InitResource()
 
 bool RunOp()
 {
-    OperatorDesc opDesc = CreateOpDesc();
+    SampleShape sampleShape{};
+    if (!BuildSampleShape(sampleShape)) {
+        ERROR_LOG("Build sample shape failed");
+        return false;
+    }
+    OperatorDesc opDesc = CreateOpDesc(sampleShape);
 
     OpRunner opRunner(&opDesc);
     if (!opRunner.Init()) {

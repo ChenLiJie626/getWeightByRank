@@ -37,11 +37,10 @@ bool CheckSameWeightShape(const gert::Shape &lhs, const gert::Shape &rhs)
 
 bool CheckOutputShape(const gert::Shape &shape, int64_t idxCount)
 {
-    return shape.GetDimNum() == 3 &&
-           shape.GetDim(0) == idxCount * INDEX_GROUP_WIDTH &&
-           shape.GetDim(1) > 0 &&
-           shape.GetDim(1) <= OUTPUT_COLS &&
-           shape.GetDim(2) == ROWS;
+    (void)idxCount;
+    return shape.GetDimNum() == 2 &&
+           shape.GetDim(0) > 0 &&
+           shape.GetDim(1) == ROWS;
 }
 
 bool CheckSameOutputShape(const gert::Shape &lhs, const gert::Shape &rhs)
@@ -90,21 +89,20 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
         return ge::GRAPH_FAILED;
     }
     const int64_t totalUserEntries = userIdsShape.GetDim(0);
-    if (totalUserEntries < 0 ||
-        static_cast<uint64_t>(totalUserEntries) > static_cast<uint64_t>(idxCount) * OUTPUT_COLS) {
+    if (totalUserEntries < 0) {
         return ge::GRAPH_FAILED;
     }
     if (!CheckOutputShape(outRShape, idxCount) ||
         !CheckSameOutputShape(outRShape, outIShape)) {
         return ge::GRAPH_FAILED;
     }
-    const int64_t outputRows = outRShape.GetDim(1);
+    const int64_t totalOutputRows = outRShape.GetDim(0);
 
     GetWeightByRankTilingData tiling;
     tiling.set_userCount(static_cast<uint32_t>(userCount));
     tiling.set_idxCount(static_cast<uint32_t>(idxCount));
     tiling.set_totalUserEntries(static_cast<uint32_t>(totalUserEntries));
-    tiling.set_outputRows(static_cast<uint32_t>(outputRows));
+    tiling.set_totalOutputRows(static_cast<uint32_t>(totalOutputRows));
 
     const uint64_t dstCount = static_cast<uint64_t>(idxCount) * INDEX_GROUP_WIDTH;
     uint32_t blockDim = DEFAULT_BLOCK_DIM;

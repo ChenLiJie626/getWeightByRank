@@ -19,7 +19,7 @@ BEGIN_TILING_DATA_DEF(GetWeightByRankTilingData)
 TILING_DATA_FIELD_DEF(uint32_t, userCount);
 TILING_DATA_FIELD_DEF(uint32_t, idxCount);
 TILING_DATA_FIELD_DEF(uint32_t, totalUserEntries);
-TILING_DATA_FIELD_DEF(uint32_t, outputRows);
+TILING_DATA_FIELD_DEF(uint32_t, totalOutputRows);
 END_TILING_DATA_DEF;
 
 REGISTER_TILING_DATA_CLASS(GetWeightByRank, GetWeightByRankTilingData)
