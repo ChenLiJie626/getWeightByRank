@@ -72,8 +72,10 @@ def build_golden(weight: np.ndarray) -> np.ndarray:
             dst_col = 0
             for user_id, rank_count in zip(user_ids, ranks):
                 copy_rows = max(0, min(int(rank_count), group_rows - dst_col))
+                scale = np.sqrt(1.0 / float(min(max(int(rank_count), 1), RANKS)))
                 for rank_offset in range(copy_rows):
-                    out[dst_row + dst_col + rank_offset, :] = weight[int(user_id), src_index, rank_offset, :]
+                    src_row = int(user_id) * INDEX_COUNT + src_index
+                    out[dst_row + dst_col + rank_offset, :] = weight[src_row, rank_offset, :] * scale
                 dst_col += int(rank_count)
         output_row_base += group_rows * RANKS
         user_offset += cur_len
@@ -85,7 +87,7 @@ def main() -> None:
     os.makedirs("input", exist_ok=True)
     os.makedirs("output", exist_ok=True)
 
-    shape = (USER_COUNT, INDEX_COUNT, RANKS, ROWS)
+    shape = (USER_COUNT * INDEX_COUNT, RANKS, ROWS)
     weight_r = rng.uniform(-1.0, 1.0, size=shape).astype(np.float32)
     weight_i = rng.uniform(-1.0, 1.0, size=shape).astype(np.float32)
 

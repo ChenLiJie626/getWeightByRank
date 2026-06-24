@@ -15,11 +15,11 @@ bool CheckVectorShape(const gert::Shape &shape, int64_t len)
 
 bool CheckWeightShape(const gert::Shape &shape)
 {
-    return shape.GetDimNum() == 4 &&
+    return shape.GetDimNum() == 3 &&
            shape.GetDim(0) > 0 &&
-           shape.GetDim(1) == INDEX_COUNT &&
-           shape.GetDim(2) == RANKS_PER_INDEX &&
-           shape.GetDim(3) == ROWS;
+           shape.GetDim(0) % INDEX_COUNT == 0 &&
+           shape.GetDim(1) == RANKS_PER_INDEX &&
+           shape.GetDim(2) == ROWS;
 }
 
 bool CheckSameWeightShape(const gert::Shape &lhs, const gert::Shape &rhs)
@@ -80,7 +80,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     if (idxsShape.GetDimNum() != 1 || idxsShape.GetDim(0) <= 0) {
         return ge::GRAPH_FAILED;
     }
-    const int64_t userCount = weightRShape.GetDim(0);
+    const int64_t userCount = weightRShape.GetDim(0) / INDEX_COUNT;
     const int64_t idxCount = idxsShape.GetDim(0);
     if (!CheckVectorShape(lensShape, idxCount) ||
         userIdsShape.GetDimNum() != 1 ||

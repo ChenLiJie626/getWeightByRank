@@ -143,7 +143,7 @@ int deviceId = 0;
 
 OperatorDesc CreateOpDesc(const SampleShape &sampleShape)
 {
-    std::vector<int64_t> weightShape{sampleShape.userCount, INDEX_COUNT, RANKS, ROWS};
+    std::vector<int64_t> weightShape{sampleShape.userCount * INDEX_COUNT, RANKS, ROWS};
     std::vector<int64_t> idxShape{sampleShape.idxCount};
     std::vector<int64_t> userListShape{sampleShape.totalUserEntries};
     std::vector<int64_t> outputShape{sampleShape.totalOutputRows, ROWS};

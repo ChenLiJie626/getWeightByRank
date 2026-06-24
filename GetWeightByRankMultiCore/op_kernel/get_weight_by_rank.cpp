@@ -47,6 +47,28 @@ __aicore__ inline uint32_t GetRankCount(int32_t rankCount)
     return count < RANKS_PER_INDEX ? count : RANKS_PER_INDEX;
 }
 
+__aicore__ inline float GetRankScale(uint32_t rankCount)
+{
+    switch (rankCount) {
+        case 2:
+            return 0.7071067811865475f;
+        case 3:
+            return 0.5773502691896258f;
+        case 4:
+            return 0.5f;
+        case 5:
+            return 0.4472135954999579f;
+        case 6:
+            return 0.4082482904638630f;
+        case 7:
+            return 0.3779644730092272f;
+        case 8:
+            return 0.3535533905932738f;
+        default:
+            return 1.0f;
+    }
+}
+
 __aicore__ inline void AdvanceToGroup(__gm__ int32_t *lensGm, __gm__ int32_t *ranksGm,
                                       uint32_t groupCount, uint32_t totalUserEntries,
                                       uint32_t &userOffset, uint32_t &groupRowOffset)
@@ -150,6 +172,12 @@ __aicore__ inline void ProcessDstIndex(GlobalTensor<float> &weightR, GlobalTenso
                 DataCopy(tmpRLocal, weightR[baseSrcOffset], copyElems);
                 DataCopy(tmpILocal, weightI[baseSrcOffset], copyElems);
                 PipeBarrier<PIPE_ALL>();
+                const float rankScale = GetRankScale(rankCount);
+                if (rankScale != 1.0f) {
+                    Muls(tmpRLocal, tmpRLocal, rankScale, copyElems);
+                    Muls(tmpILocal, tmpILocal, rankScale, copyElems);
+                    PipeBarrier<PIPE_ALL>();
+                }
                 DataCopy(outR[baseDstOffset], tmpRLocal, copyElems);
                 DataCopy(outI[baseDstOffset], tmpILocal, copyElems);
                 PipeBarrier<PIPE_ALL>();

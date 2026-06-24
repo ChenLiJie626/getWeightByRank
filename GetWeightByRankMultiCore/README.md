@@ -4,7 +4,7 @@ This directory is the AscendC custom-operator project for `GetWeightByRank`.
 
 Inputs:
 
-- `weight_r`, `weight_i`: `float`, shape `[userCount, 136, 8, 256]`.
+- `weight_r`, `weight_i`: `float`, shape `[userCount * 136, 8, 256]`.
 - `getIdxs`: `int32`, shape `[idxCount]`. Each value maps to eight source indexes: `idx * 8` through `idx * 8 + 7`.
 - `lens`: `int32`, shape `[idxCount]`.
 - `getuserIds`, `getuserIdRank`: `int32`, shape `[sum(lens)]`.
@@ -20,12 +20,13 @@ user_offset = sum(lens[:i])
 output_row_base = 8 * sum(sum(getuserIdRank[sum(lens[:j]):sum(lens[:j + 1])]) for j in range(i))
 group_rows = sum(getuserIdRank[user_offset:user_offset + lens[i]])
 rank_prefix = sum(getuserIdRank[user_offset:user_offset + k])
+scale = sqrt(1.0 / getuserIdRank[user_offset + k])
 for r in range(getuserIdRank[user_offset + k]):
     weightout_[output_row_base + t * group_rows + rank_prefix + r, row] =
-        weight_[getuserIds[user_offset + k], getIdxs[i] * 8 + t, r, row]
+        weight_[getuserIds[user_offset + k] * 136 + getIdxs[i] * 8 + t, r, row] * scale
 ```
 
-`user_offset` is the sum of prior `lens` entries and only selects the current group's user/rank slice. The output row prefix is local to the current idx group. Each rank count is greater than zero and no greater than the source rank dimension.
+`user_offset` is the sum of prior `lens` entries and only selects the current group's user/rank slice. The output row prefix is local to the current idx group. Each copied user block is scaled by `sqrt(1.0 / rank_count)`. Each rank count is greater than zero and no greater than the source rank dimension.
 
 Implementation notes:
 
