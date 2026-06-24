@@ -30,7 +30,7 @@
                     "ND"
                 ],
                 "type": [
-                    "int32"
+                    "uint32"
                 ]
             },
             {
@@ -40,7 +40,7 @@
                     "ND"
                 ],
                 "type": [
-                    "int32"
+                    "uint32"
                 ]
             },
             {
@@ -50,7 +50,7 @@
                     "ND"
                 ],
                 "type": [
-                    "int32"
+                    "uint32"
                 ]
             },
             {
@@ -60,7 +60,17 @@
                     "ND"
                 ],
                 "type": [
-                    "int32"
+                    "uint32"
+                ]
+            },
+            {
+                "name": "totalRows",
+                "param_type": "required",
+                "format": [
+                    "ND"
+                ],
+                "type": [
+                    "uint32"
                 ]
             }
         ],

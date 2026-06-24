@@ -35,60 +35,20 @@ bool CheckSameWeightShape(const gert::Shape &lhs, const gert::Shape &rhs)
     return true;
 }
 
-int64_t NormalizeRankCount(int64_t rankCount)
-{
-    if (rankCount <= 0) {
-        return 0;
-    }
-    return rankCount < RANKS_PER_INDEX ? rankCount : RANKS_PER_INDEX;
-}
-
-bool InferTotalOutputRowsImpl(const int64_t *lensData, const int64_t *rankData,
-                              int64_t idxCount, int64_t totalUserEntries, int64_t &totalOutputRows)
-{
-    if (lensData == nullptr || rankData == nullptr || idxCount <= 0 || totalUserEntries < 0) {
-        return false;
-    }
-
-    int64_t userOffset = 0;
-    totalOutputRows = 0;
-    for (int64_t i = 0; i < idxCount; ++i) {
-        const int64_t currentLen = lensData[i] > 0 ? static_cast<int64_t>(lensData[i]) : 0;
-        if (userOffset + currentLen > totalUserEntries) {
-            return false;
-        }
-
-        int64_t groupRows = 0;
-        for (int64_t k = 0; k < currentLen; ++k) {
-            groupRows += NormalizeRankCount(rankData[userOffset + k]);
-        }
-        totalOutputRows += groupRows * INDEX_GROUP_WIDTH;
-        userOffset += currentLen;
-    }
-    return userOffset == totalUserEntries && totalOutputRows > 0;
-}
-
-bool InferTotalOutputRows(const gert::Tensor *lensTensor, const gert::Tensor *ranksTensor,
-                          int64_t idxCount, int64_t totalUserEntries, int64_t &totalOutputRows)
-{
-    if (lensTensor == nullptr || ranksTensor == nullptr ||
-        lensTensor->GetDataType() != ranksTensor->GetDataType() ||
-        lensTensor->GetShapeSize() != idxCount ||
-        ranksTensor->GetShapeSize() != totalUserEntries) {
-        return false;
-    }
-    if (lensTensor->GetDataType() == ge::DT_INT64) {
-        return InferTotalOutputRowsImpl(lensTensor->GetData<int64_t>(), ranksTensor->GetData<int64_t>(),
-                                        idxCount, totalUserEntries, totalOutputRows);
-    }
-    return false;
-}
-
 bool CheckOutputShape(const gert::Shape &shape)
 {
     return shape.GetDimNum() == 2 &&
            shape.GetDim(0) > 0 &&
            shape.GetDim(1) == ROWS;
+}
+
+bool GetTotalRowsFromShape(const gert::Shape &totalRowsShape, int64_t &totalRows)
+{
+    if (totalRowsShape.GetDimNum() != 1 || totalRowsShape.GetDim(0) <= 0) {
+        return false;
+    }
+    totalRows = totalRowsShape.GetDim(0);
+    return true;
 }
 
 bool CheckSameOutputShape(const gert::Shape &lhs, const gert::Shape &rhs)
@@ -115,10 +75,12 @@ UINT32 InferShapeFunc(gert::InferShapeContext *context)
     const gert::Shape *lensShape = context->GetInputShape(3);
     const gert::Shape *userIdsShape = context->GetInputShape(4);
     const gert::Shape *ranksShape = context->GetInputShape(5);
+    const gert::Shape *totalRowsShape = context->GetInputShape(6);
     gert::Shape *outRShape = context->GetOutputShape(0);
     gert::Shape *outIShape = context->GetOutputShape(1);
     if (weightRShape == nullptr || weightIShape == nullptr || idxsShape == nullptr ||
         lensShape == nullptr || userIdsShape == nullptr || ranksShape == nullptr ||
+        totalRowsShape == nullptr ||
         outRShape == nullptr || outIShape == nullptr) {
         return ge::GRAPH_FAILED;
     }
@@ -135,8 +97,7 @@ UINT32 InferShapeFunc(gert::InferShapeContext *context)
     }
 
     int64_t totalOutputRows = 0;
-    if (!InferTotalOutputRows(context->GetInputTensor(3), context->GetInputTensor(5),
-                              idxCount, userIdsShape->GetDim(0), totalOutputRows)) {
+    if (!GetTotalRowsFromShape(*totalRowsShape, totalOutputRows)) {
         return ge::GRAPH_FAILED;
     }
 
@@ -172,6 +133,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     auto lensShape = context->GetInputTensor(3)->GetOriginShape();
     auto userIdsShape = context->GetInputTensor(4)->GetOriginShape();
     auto ranksShape = context->GetInputTensor(5)->GetOriginShape();
+    auto totalRowsShape = context->GetInputTensor(6)->GetOriginShape();
     auto outRStorageShape = context->GetOutputShape(0);
     auto outIStorageShape = context->GetOutputShape(1);
     if (outRStorageShape == nullptr || outIStorageShape == nullptr) {
@@ -201,10 +163,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     if (!CheckOutputShape(outRShape) || !CheckSameOutputShape(outRShape, outIShape)) {
         return ge::GRAPH_FAILED;
     }
-    int64_t inferredOutputRows = 0;
-    if (InferTotalOutputRows(context->GetInputTensor(3), context->GetInputTensor(5),
-                             idxCount, totalUserEntries, inferredOutputRows) &&
-        outRShape.GetDim(0) != inferredOutputRows) {
+    int64_t totalRowsFromShape = 0;
+    if (!GetTotalRowsFromShape(totalRowsShape, totalRowsFromShape) ||
+        outRShape.GetDim(0) != totalRowsFromShape) {
         return ge::GRAPH_FAILED;
     }
     const int64_t totalOutputRows = outRShape.GetDim(0);
@@ -248,22 +209,24 @@ public:
             .Format({ge::FORMAT_ND});
         this->Input("getIdxs")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_INT32})
+            .DataType({ge::DT_UINT32})
             .Format({ge::FORMAT_ND});
         this->Input("lens")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_INT64})
-            .Format({ge::FORMAT_ND})
-            .ValueDepend(REQUIRED);
+            .DataType({ge::DT_UINT32})
+            .Format({ge::FORMAT_ND});
         this->Input("getuserIds")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_INT32})
+            .DataType({ge::DT_UINT32})
             .Format({ge::FORMAT_ND});
         this->Input("getuserIdRank")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_INT64})
-            .Format({ge::FORMAT_ND})
-            .ValueDepend(REQUIRED);
+            .DataType({ge::DT_UINT32})
+            .Format({ge::FORMAT_ND});
+        this->Input("totalRows")
+            .ParamType(REQUIRED)
+            .DataType({ge::DT_UINT32})
+            .Format({ge::FORMAT_ND});
         this->Output("weightout_r")
             .ParamType(REQUIRED)
             .DataType({ge::DT_FLOAT})

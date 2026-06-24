@@ -5,10 +5,11 @@ This directory is the AscendC custom-operator project for `GetWeightByRank`.
 Inputs:
 
 - `weight_r`, `weight_i`: `float`, shape `[userCount * 136, 8, 256]`.
-- `getIdxs`: `int32`, shape `[idxCount]`. Each value maps to eight source indexes: `idx * 8` through `idx * 8 + 7`.
-- `lens`: `int64`, shape `[idxCount]`.
-- `getuserIds`: `int32`, shape `[sum(lens)]`.
-- `getuserIdRank`: `int64`, shape `[sum(lens)]`.
+- `getIdxs`: `uint32`, shape `[idxCount]`. Each value maps to eight source indexes: `idx * 8` through `idx * 8 + 7`.
+- `lens`: `uint32`, shape `[idxCount]`.
+- `getuserIds`: `uint32`, shape `[sum(lens)]`.
+- `getuserIdRank`: `uint32`, shape `[sum(lens)]`.
+- `totalRows`: `uint32`, shape `[totalOutputRows]`. Its first-dimension length is the exact first dimension of the two outputs; its values are not read by the operator.
 
 Outputs:
 
@@ -17,7 +18,8 @@ Outputs:
 Shape/type inference:
 
 - Output dtypes follow `weight_r` and `weight_i` and are inferred as `float`.
-- The op proto declares `lens` and `getuserIdRank` as value-dependent inputs, then infers output shape as `[totalOutputRows, 256]`.
+- The op infers output shape as `[shape(totalRows)[0], 256]`.
+- `lens`, `getuserIdRank`, and `totalRows` are normal runtime tensor inputs; no input is declared value-dependent.
 - `totalOutputRows = 8 * sum(sum(clamp(getuserIdRank[sum(lens[:i]):sum(lens[:i + 1])], 0, 8)) for i in range(idxCount))`.
 
 For idx group `i`, user entry `k`, and local index `t` in `[0, 7]`, `getuserIdRank[user_offset + k]` is the number of leading rank columns to copy for that user. These columns are concatenated from column `0` inside each idx group:

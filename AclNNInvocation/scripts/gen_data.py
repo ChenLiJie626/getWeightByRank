@@ -16,26 +16,26 @@ SCENARIO = os.getenv("GET_WEIGHT_SCENARIO", SCENARIO_SCALE_USER30_IDX17_LENS4_RA
 def build_scenario(name: str):
     if name == SCENARIO_SCALE_USER30_IDX17_LENS2:
         user_count = 30
-        get_idxs = np.arange(17, dtype=np.int32)
-        lens = np.full(len(get_idxs), 2, dtype=np.int64)
+        get_idxs = np.arange(17, dtype=np.uint32)
+        lens = np.full(len(get_idxs), 2, dtype=np.uint32)
         total_user_entries = int(np.sum(lens))
-        user_ids = (np.arange(total_user_entries, dtype=np.int32) % user_count).astype(np.int32)
-        user_ranks = np.ones(total_user_entries, dtype=np.int64)
+        user_ids = (np.arange(total_user_entries, dtype=np.uint32) % user_count).astype(np.uint32)
+        user_ranks = np.ones(total_user_entries, dtype=np.uint32)
         return user_count, get_idxs, lens, user_ids, user_ranks
     if name == SCENARIO_SCALE_USER30_IDX17_LENS4_RANK2:
         user_count = 30
-        get_idxs = np.arange(17, dtype=np.int32)
-        lens = np.array([6, 5] + [4] * 13 + [3, 2], dtype=np.int64)
+        get_idxs = np.arange(17, dtype=np.uint32)
+        lens = np.array([6, 5] + [4] * 13 + [3, 2], dtype=np.uint32)
         total_user_entries = int(np.sum(lens))
-        user_ids = (np.arange(total_user_entries, dtype=np.int32) % user_count).astype(np.int32)
-        user_ranks = np.full(total_user_entries, 2, dtype=np.int64)
+        user_ids = (np.arange(total_user_entries, dtype=np.uint32) % user_count).astype(np.uint32)
+        user_ranks = np.full(total_user_entries, 2, dtype=np.uint32)
         return user_count, get_idxs, lens, user_ids, user_ranks
     if name == SCENARIO_PREFIX_OUTCOL_REGRESSION:
         user_count = 4
-        get_idxs = np.array([0, 2, 16], dtype=np.int32)
-        lens = np.array([3, 4, 3], dtype=np.int64)
-        user_ids = np.array([0, 2, 1, 1, 3, 0, 2, 2, 1, 3], dtype=np.int32)
-        user_ranks = np.array([1, 2, 1, 2, 1, 2, 1, 3, 1, 2], dtype=np.int64)
+        get_idxs = np.array([0, 2, 16], dtype=np.uint32)
+        lens = np.array([3, 4, 3], dtype=np.uint32)
+        user_ids = np.array([0, 2, 1, 1, 3, 0, 2, 2, 1, 3], dtype=np.uint32)
+        user_ranks = np.array([1, 2, 1, 2, 1, 2, 1, 3, 1, 2], dtype=np.uint32)
         return user_count, get_idxs, lens, user_ids, user_ranks
     raise ValueError(f"Unknown GET_WEIGHT_SCENARIO: {name}")
 
@@ -97,6 +97,7 @@ def main() -> None:
     LENS.tofile("input/input_lens.bin")
     GET_USER_IDS.tofile("input/input_user_ids.bin")
     GET_USER_RANKS.tofile("input/input_user_ranks.bin")
+    np.zeros(TOTAL_OUTPUT_ROWS, dtype=np.uint32).tofile("input/input_total_rows.bin")
 
     build_golden(weight_r).tofile("output/golden_weightout_r.bin")
     build_golden(weight_i).tofile("output/golden_weightout_i.bin")
