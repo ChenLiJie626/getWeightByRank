@@ -66,7 +66,27 @@ bool ReadInt32File(const std::string &path, std::vector<int32_t> &values)
     return true;
 }
 
-int64_t NormalizeRankCount(int32_t rankCount)
+bool ReadInt64File(const std::string &path, std::vector<int64_t> &values)
+{
+    int64_t count = 0;
+    if (!GetElementCount(path, sizeof(int64_t), count)) {
+        return false;
+    }
+    values.resize(static_cast<size_t>(count));
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        ERROR_LOG("Open int64 file failed. path=%s", path.c_str());
+        return false;
+    }
+    in.read(reinterpret_cast<char *>(values.data()), static_cast<std::streamsize>(values.size() * sizeof(int64_t)));
+    if (!in) {
+        ERROR_LOG("Read int64 file failed. path=%s", path.c_str());
+        return false;
+    }
+    return true;
+}
+
+int64_t NormalizeRankCount(int64_t rankCount)
 {
     if (rankCount <= 0) {
         return 0;
@@ -85,7 +105,7 @@ bool BuildSampleShape(SampleShape &shape)
         !GetElementCount("../input/input_weight_i.bin", sizeof(float), weightIElems) ||
         !GetElementCount("../input/input_get_idxs.bin", sizeof(int32_t), idxCount) ||
         !GetElementCount("../input/input_user_ids.bin", sizeof(int32_t), userIdCount) ||
-        !GetElementCount("../input/input_user_ranks.bin", sizeof(int32_t), rankCount)) {
+        !GetElementCount("../input/input_user_ranks.bin", sizeof(int64_t), rankCount)) {
         return false;
     }
     const int64_t elemsPerUser = INDEX_COUNT * RANKS * ROWS;
@@ -95,10 +115,10 @@ bool BuildSampleShape(SampleShape &shape)
         return false;
     }
 
-    std::vector<int32_t> lens;
-    std::vector<int32_t> ranks;
-    if (!ReadInt32File("../input/input_lens.bin", lens) ||
-        !ReadInt32File("../input/input_user_ranks.bin", ranks)) {
+    std::vector<int64_t> lens;
+    std::vector<int64_t> ranks;
+    if (!ReadInt64File("../input/input_lens.bin", lens) ||
+        !ReadInt64File("../input/input_user_ranks.bin", ranks)) {
         return false;
     }
     if (static_cast<int64_t>(lens.size()) != idxCount ||
@@ -152,9 +172,9 @@ OperatorDesc CreateOpDesc(const SampleShape &sampleShape)
     opDesc.AddInputTensorDesc(ACL_FLOAT, weightShape.size(), weightShape.data(), format);
     opDesc.AddInputTensorDesc(ACL_FLOAT, weightShape.size(), weightShape.data(), format);
     opDesc.AddInputTensorDesc(ACL_INT32, idxShape.size(), idxShape.data(), format);
-    opDesc.AddInputTensorDesc(ACL_INT32, idxShape.size(), idxShape.data(), format);
+    opDesc.AddInputTensorDesc(ACL_INT64, idxShape.size(), idxShape.data(), format);
     opDesc.AddInputTensorDesc(ACL_INT32, userListShape.size(), userListShape.data(), format);
-    opDesc.AddInputTensorDesc(ACL_INT32, userListShape.size(), userListShape.data(), format);
+    opDesc.AddInputTensorDesc(ACL_INT64, userListShape.size(), userListShape.data(), format);
     opDesc.AddOutputTensorDesc(ACL_FLOAT, outputShape.size(), outputShape.data(), format);
     opDesc.AddOutputTensorDesc(ACL_FLOAT, outputShape.size(), outputShape.data(), format);
     return opDesc;

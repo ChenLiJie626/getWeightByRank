@@ -6,12 +6,19 @@ Inputs:
 
 - `weight_r`, `weight_i`: `float`, shape `[userCount * 136, 8, 256]`.
 - `getIdxs`: `int32`, shape `[idxCount]`. Each value maps to eight source indexes: `idx * 8` through `idx * 8 + 7`.
-- `lens`: `int32`, shape `[idxCount]`.
-- `getuserIds`, `getuserIdRank`: `int32`, shape `[sum(lens)]`.
+- `lens`: `int64`, shape `[idxCount]`.
+- `getuserIds`: `int32`, shape `[sum(lens)]`.
+- `getuserIdRank`: `int64`, shape `[sum(lens)]`.
 
 Outputs:
 
 - `weightout_r`, `weightout_i`: `float`, shape `[totalOutputRows, 256]`, where `totalOutputRows = 8 * sum(group_rows for every idx group)`.
+
+Shape/type inference:
+
+- Output dtypes follow `weight_r` and `weight_i` and are inferred as `float`.
+- The op proto declares `lens` and `getuserIdRank` as value-dependent inputs, then infers output shape as `[totalOutputRows, 256]`.
+- `totalOutputRows = 8 * sum(sum(clamp(getuserIdRank[sum(lens[:i]):sum(lens[:i + 1])], 0, 8)) for i in range(idxCount))`.
 
 For idx group `i`, user entry `k`, and local index `t` in `[0, 7]`, `getuserIdRank[user_offset + k]` is the number of leading rank columns to copy for that user. These columns are concatenated from column `0` inside each idx group:
 

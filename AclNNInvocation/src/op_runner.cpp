@@ -312,13 +312,31 @@ bool OpRunner::RunOp()
     }
     INFO_LOG("Create stream success");
 
+    const auto *lensValues = reinterpret_cast<const int64_t *>(hostInputs_[3]);
+    aclIntArray *lensArray = aclCreateIntArray(lensValues, GetInputElementCount(3));
+    if (lensArray == nullptr) {
+        (void)aclrtDestroyStream(stream);
+        ERROR_LOG("Create lens aclIntArray failed");
+        return false;
+    }
+    const auto *rankValues = reinterpret_cast<const int64_t *>(hostInputs_[5]);
+    aclIntArray *rankArray = aclCreateIntArray(rankValues, GetInputElementCount(5));
+    if (rankArray == nullptr) {
+        (void)aclDestroyIntArray(lensArray);
+        (void)aclrtDestroyStream(stream);
+        ERROR_LOG("Create getuserIdRank aclIntArray failed");
+        return false;
+    }
+
     size_t workspaceSize = 0;
     aclOpExecutor *handle = nullptr;
     auto ret = aclnnGetWeightByRankGetWorkspaceSize(inputTensor_[0], inputTensor_[1], inputTensor_[2],
-                                                    inputTensor_[3], inputTensor_[4], inputTensor_[5],
+                                                    lensArray, inputTensor_[4], rankArray,
                                                     outputTensor_[0], outputTensor_[1],
                                                     &workspaceSize, &handle);
     if (ret != ACL_SUCCESS) {
+        (void)aclDestroyIntArray(lensArray);
+        (void)aclDestroyIntArray(rankArray);
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Get Operator Workspace failed. error code is %d", static_cast<int32_t>(ret));
         return false;
@@ -328,6 +346,8 @@ bool OpRunner::RunOp()
     if (workspaceSize != 0) {
         if (aclrtMalloc(&workspace_, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST) != ACL_SUCCESS) {
             ERROR_LOG("Malloc device memory failed");
+            (void)aclDestroyIntArray(lensArray);
+            (void)aclDestroyIntArray(rankArray);
             (void)aclrtDestroyStream(stream);
             return false;
         }
@@ -338,6 +358,8 @@ bool OpRunner::RunOp()
     if (aclrtCreateEvent(&startEvent) != ACL_SUCCESS || aclrtCreateEvent(&endEvent) != ACL_SUCCESS) {
         (void)aclrtDestroyEvent(startEvent);
         (void)aclrtDestroyEvent(endEvent);
+        (void)aclDestroyIntArray(lensArray);
+        (void)aclDestroyIntArray(rankArray);
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Create event failed");
         return false;
@@ -346,6 +368,8 @@ bool OpRunner::RunOp()
     if (aclrtRecordEvent(startEvent, stream) != ACL_SUCCESS) {
         (void)aclrtDestroyEvent(startEvent);
         (void)aclrtDestroyEvent(endEvent);
+        (void)aclDestroyIntArray(lensArray);
+        (void)aclDestroyIntArray(rankArray);
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Record start event failed");
         return false;
@@ -355,6 +379,8 @@ bool OpRunner::RunOp()
     if (ret != ACL_SUCCESS) {
         (void)aclrtDestroyEvent(startEvent);
         (void)aclrtDestroyEvent(endEvent);
+        (void)aclDestroyIntArray(lensArray);
+        (void)aclDestroyIntArray(rankArray);
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Execute Operator failed. error code is %d", static_cast<int32_t>(ret));
         return false;
@@ -364,6 +390,8 @@ bool OpRunner::RunOp()
     if (aclrtRecordEvent(endEvent, stream) != ACL_SUCCESS) {
         (void)aclrtDestroyEvent(startEvent);
         (void)aclrtDestroyEvent(endEvent);
+        (void)aclDestroyIntArray(lensArray);
+        (void)aclDestroyIntArray(rankArray);
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Record end event failed");
         return false;
@@ -373,6 +401,8 @@ bool OpRunner::RunOp()
     if (ret != SUCCESS) {
         (void)aclrtDestroyEvent(startEvent);
         (void)aclrtDestroyEvent(endEvent);
+        (void)aclDestroyIntArray(lensArray);
+        (void)aclDestroyIntArray(rankArray);
         ERROR_LOG("Synchronize stream failed. error code is %d", static_cast<int32_t>(ret));
         (void)aclrtDestroyStream(stream);
         return false;
@@ -383,6 +413,8 @@ bool OpRunner::RunOp()
     if (aclrtEventElapsedTime(&elapsedMs, startEvent, endEvent) != ACL_SUCCESS) {
         (void)aclrtDestroyEvent(startEvent);
         (void)aclrtDestroyEvent(endEvent);
+        (void)aclDestroyIntArray(lensArray);
+        (void)aclDestroyIntArray(rankArray);
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Get event elapsed time failed");
         return false;
@@ -390,6 +422,8 @@ bool OpRunner::RunOp()
     INFO_LOG("Kernel elapsed time %.3f ms", elapsedMs);
     (void)aclrtDestroyEvent(startEvent);
     (void)aclrtDestroyEvent(endEvent);
+    (void)aclDestroyIntArray(lensArray);
+    (void)aclDestroyIntArray(rankArray);
 
     for (size_t i = 0; i < numOutputs_; ++i) {
         auto size = GetOutputSize(i);
