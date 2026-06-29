@@ -19,8 +19,9 @@ constexpr int64_t RANKS = 8;
 
 struct SampleShape {
     int64_t userCount;
+    int64_t idxTensorLen;
     int64_t idxCount;
-    int64_t totalUserEntries;
+    int64_t userEntryTensorLen;
     int64_t totalOutputRows;
 };
 
@@ -78,32 +79,41 @@ bool BuildSampleShape(SampleShape &shape)
 {
     int64_t weightElems = 0;
     int64_t weightIElems = 0;
-    int64_t idxCount = 0;
+    int64_t idxTensorLen = 0;
     int64_t userIdCount = 0;
     int64_t rankCount = 0;
     int64_t totalRowsCount = 0;
+    int64_t idxCountElems = 0;
     if (!GetElementCount("../input/input_weight_r.bin", sizeof(float), weightElems) ||
         !GetElementCount("../input/input_weight_i.bin", sizeof(float), weightIElems) ||
-        !GetElementCount("../input/input_get_idxs.bin", sizeof(uint32_t), idxCount) ||
+        !GetElementCount("../input/input_get_idxs.bin", sizeof(uint32_t), idxTensorLen) ||
         !GetElementCount("../input/input_user_ids.bin", sizeof(uint32_t), userIdCount) ||
         !GetElementCount("../input/input_user_ranks.bin", sizeof(uint32_t), rankCount) ||
-        !GetElementCount("../input/input_total_rows.bin", sizeof(uint32_t), totalRowsCount)) {
+        !GetElementCount("../input/input_total_rows.bin", sizeof(uint32_t), totalRowsCount) ||
+        !GetElementCount("../input/input_idx_count.bin", sizeof(uint32_t), idxCountElems)) {
         return false;
     }
     const int64_t elemsPerUser = INDEX_COUNT * RANKS * ROWS;
     if (weightElems <= 0 || weightElems != weightIElems || weightElems % elemsPerUser != 0 ||
-        idxCount <= 0 || userIdCount != rankCount) {
+        idxTensorLen <= 0 || userIdCount != rankCount || idxCountElems != 1) {
         ERROR_LOG("Invalid generated input sizes");
         return false;
     }
 
     std::vector<uint32_t> lens;
     std::vector<uint32_t> ranks;
+    std::vector<uint32_t> idxCountInput;
     if (!ReadUint32File("../input/input_lens.bin", lens) ||
-        !ReadUint32File("../input/input_user_ranks.bin", ranks)) {
+        !ReadUint32File("../input/input_user_ranks.bin", ranks) ||
+        !ReadUint32File("../input/input_idx_count.bin", idxCountInput)) {
         return false;
     }
-    if (static_cast<int64_t>(lens.size()) != idxCount ||
+    const int64_t idxCount = static_cast<int64_t>(idxCountInput[0]);
+    if (idxCount <= 0 || idxCount > idxTensorLen) {
+        ERROR_LOG("idxCount input is out of range. idxCount=%ld, idxTensorLen=%ld", idxCount, idxTensorLen);
+        return false;
+    }
+    if (static_cast<int64_t>(lens.size()) != idxTensorLen ||
         static_cast<int64_t>(ranks.size()) != userIdCount) {
         ERROR_LOG("Input vector sizes do not match idx/user metadata");
         return false;
@@ -124,7 +134,7 @@ bool BuildSampleShape(SampleShape &shape)
         totalOutputRows += currentRows * RANKS;
         userOffset += currentLen;
     }
-    if (userOffset != userIdCount || totalOutputRows <= 0) {
+    if (userOffset > userIdCount || totalOutputRows <= 0) {
         ERROR_LOG("Invalid dynamic output rows. consumed=%ld, userIdCount=%ld, totalOutputRows=%ld",
                   userOffset, userIdCount, totalOutputRows);
         return false;
@@ -135,11 +145,12 @@ bool BuildSampleShape(SampleShape &shape)
     }
 
     shape.userCount = weightElems / elemsPerUser;
+    shape.idxTensorLen = idxTensorLen;
     shape.idxCount = idxCount;
-    shape.totalUserEntries = userIdCount;
+    shape.userEntryTensorLen = userIdCount;
     shape.totalOutputRows = totalOutputRows;
-    INFO_LOG("Resolved sample shape: userCount=%ld, idxCount=%ld, totalUserEntries=%ld, totalOutputRows=%ld",
-             shape.userCount, shape.idxCount, shape.totalUserEntries, shape.totalOutputRows);
+    INFO_LOG("Resolved sample shape: userCount=%ld, idxTensorLen=%ld, idxCount=%ld, userEntryTensorLen=%ld, totalOutputRows=%ld",
+             shape.userCount, shape.idxTensorLen, shape.idxCount, shape.userEntryTensorLen, shape.totalOutputRows);
     return true;
 }
 } // namespace
@@ -150,9 +161,10 @@ int deviceId = 0;
 OperatorDesc CreateOpDesc(const SampleShape &sampleShape)
 {
     std::vector<int64_t> weightShape{sampleShape.userCount * INDEX_COUNT, RANKS, ROWS};
-    std::vector<int64_t> idxShape{sampleShape.idxCount};
-    std::vector<int64_t> userListShape{sampleShape.totalUserEntries};
+    std::vector<int64_t> idxShape{sampleShape.idxTensorLen};
+    std::vector<int64_t> userListShape{sampleShape.userEntryTensorLen};
     std::vector<int64_t> totalRowsShape{sampleShape.totalOutputRows};
+    std::vector<int64_t> idxCountShape{1};
     std::vector<int64_t> outputShape{sampleShape.totalOutputRows, ROWS};
     aclFormat format = ACL_FORMAT_ND;
     OperatorDesc opDesc;
@@ -163,6 +175,7 @@ OperatorDesc CreateOpDesc(const SampleShape &sampleShape)
     opDesc.AddInputTensorDesc(ACL_UINT32, userListShape.size(), userListShape.data(), format);
     opDesc.AddInputTensorDesc(ACL_UINT32, userListShape.size(), userListShape.data(), format);
     opDesc.AddInputTensorDesc(ACL_UINT32, totalRowsShape.size(), totalRowsShape.data(), format);
+    opDesc.AddInputTensorDesc(ACL_UINT32, idxCountShape.size(), idxCountShape.data(), format);
     opDesc.AddOutputTensorDesc(ACL_FLOAT, outputShape.size(), outputShape.data(), format);
     opDesc.AddOutputTensorDesc(ACL_FLOAT, outputShape.size(), outputShape.data(), format);
     return opDesc;
@@ -177,7 +190,8 @@ bool SetInputData(OpRunner &runner)
         !ReadFile("../input/input_lens.bin", fileSize, runner.GetInputBuffer<void>(3), runner.GetInputSize(3)) ||
         !ReadFile("../input/input_user_ids.bin", fileSize, runner.GetInputBuffer<void>(4), runner.GetInputSize(4)) ||
         !ReadFile("../input/input_user_ranks.bin", fileSize, runner.GetInputBuffer<void>(5), runner.GetInputSize(5)) ||
-        !ReadFile("../input/input_total_rows.bin", fileSize, runner.GetInputBuffer<void>(6), runner.GetInputSize(6))) {
+        !ReadFile("../input/input_total_rows.bin", fileSize, runner.GetInputBuffer<void>(6), runner.GetInputSize(6)) ||
+        !ReadFile("../input/input_idx_count.bin", fileSize, runner.GetInputBuffer<void>(7), runner.GetInputSize(7))) {
         return false;
     }
     INFO_LOG("Set input success");

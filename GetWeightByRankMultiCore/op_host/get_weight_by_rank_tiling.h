@@ -17,8 +17,6 @@ constexpr int32_t DEFAULT_BLOCK_DIM = 16;
 namespace optiling {
 BEGIN_TILING_DATA_DEF(GetWeightByRankTilingData)
 TILING_DATA_FIELD_DEF(uint32_t, userCount);
-TILING_DATA_FIELD_DEF(uint32_t, idxCount);
-TILING_DATA_FIELD_DEF(uint32_t, totalUserEntries);
 TILING_DATA_FIELD_DEF(uint32_t, totalOutputRows);
 END_TILING_DATA_DEF;
 

@@ -20,8 +20,9 @@ constexpr int64_t ROWS = 256;
 
 struct SampleShape {
     int64_t userCount;
+    int64_t idxTensorLen;
     int64_t idxCount;
-    int64_t totalUserEntries;
+    int64_t userEntryTensorLen;
     int64_t totalOutputRows;
 };
 
@@ -104,32 +105,47 @@ bool BuildSampleShape(SampleShape &shape)
 {
     int64_t weightElems = 0;
     int64_t weightIElems = 0;
-    int64_t idxCount = 0;
+    int64_t idxTensorLen = 0;
     int64_t userIdCount = 0;
     int64_t rankCount = 0;
     int64_t totalRowsCount = 0;
+    int64_t idxCountElems = 0;
     if (!GetElementCount("../input/input_weight_r.bin", sizeof(float), weightElems) ||
         !GetElementCount("../input/input_weight_i.bin", sizeof(float), weightIElems) ||
-        !GetElementCount("../input/input_get_idxs.bin", sizeof(uint32_t), idxCount) ||
+        !GetElementCount("../input/input_get_idxs.bin", sizeof(uint32_t), idxTensorLen) ||
         !GetElementCount("../input/input_user_ids.bin", sizeof(uint32_t), userIdCount) ||
         !GetElementCount("../input/input_user_ranks.bin", sizeof(uint32_t), rankCount) ||
-        !GetElementCount("../input/input_total_rows.bin", sizeof(uint32_t), totalRowsCount)) {
+        !GetElementCount("../input/input_total_rows.bin", sizeof(uint32_t), totalRowsCount) ||
+        !GetElementCount("../input/input_idx_count.bin", sizeof(uint32_t), idxCountElems)) {
         return false;
     }
     const int64_t elemsPerUser = INDEX_COUNT * RANKS * ROWS;
     if (weightElems <= 0 || weightElems != weightIElems || weightElems % elemsPerUser != 0 ||
-        idxCount <= 0 || userIdCount != rankCount || totalRowsCount <= 0) {
+        idxTensorLen <= 0 || userIdCount != rankCount || totalRowsCount <= 0 || idxCountElems != 1) {
         std::cerr << "Invalid generated input sizes" << std::endl;
         return false;
     }
 
+    std::vector<uint8_t> idxCountBytes;
+    if (!ReadFile("../input/input_idx_count.bin", idxCountBytes)) {
+        return false;
+    }
+    const auto idxCount = static_cast<int64_t>(*reinterpret_cast<const uint32_t *>(idxCountBytes.data()));
+    if (idxCount <= 0 || idxCount > idxTensorLen) {
+        std::cerr << "idxCount input is out of range. idxCount=" << idxCount
+                  << ", idxTensorLen=" << idxTensorLen << std::endl;
+        return false;
+    }
+
     shape.userCount = weightElems / elemsPerUser;
+    shape.idxTensorLen = idxTensorLen;
     shape.idxCount = idxCount;
-    shape.totalUserEntries = userIdCount;
+    shape.userEntryTensorLen = userIdCount;
     shape.totalOutputRows = totalRowsCount;
     std::cout << "Resolved sample input shape: userCount=" << shape.userCount
+              << ", idxTensorLen=" << shape.idxTensorLen
               << ", idxCount=" << shape.idxCount
-              << ", totalUserEntries=" << shape.totalUserEntries
+              << ", userEntryTensorLen=" << shape.userEntryTensorLen
               << ", totalOutputRows=" << shape.totalOutputRows << std::endl;
     return true;
 }
@@ -153,8 +169,8 @@ int main()
     }
 
     const std::vector<int64_t> weightShape{sampleShape.userCount * INDEX_COUNT, RANKS, ROWS};
-    const std::vector<int64_t> idxShape{sampleShape.idxCount};
-    const std::vector<int64_t> userListShape{sampleShape.totalUserEntries};
+    const std::vector<int64_t> idxShape{sampleShape.idxTensorLen};
+    const std::vector<int64_t> userListShape{sampleShape.userEntryTensorLen};
 
     const auto weightDesc = MakeDesc(weightShape, ge::DT_FLOAT);
     const auto idxDesc = MakeDesc(idxShape, ge::DT_UINT32);
@@ -162,6 +178,7 @@ int main()
     const auto userIdsDesc = MakeDesc(userListShape, ge::DT_UINT32);
     const auto ranksDesc = MakeDesc(userListShape, ge::DT_UINT32);
     const auto totalRowsDesc = MakeDesc({sampleShape.totalOutputRows}, ge::DT_UINT32);
+    const auto idxCountDesc = MakeDesc({1}, ge::DT_UINT32);
     const auto outputDesc = MakeDesc({-1, ROWS}, ge::DT_FLOAT);
 
     auto weightR = MakeData("weight_r", 0, weightDesc);
@@ -171,6 +188,7 @@ int main()
     auto getuserIds = MakeData("getuserIds", 4, userIdsDesc);
     auto getuserIdRank = MakeData("getuserIdRank", 5, ranksDesc);
     auto totalRows = MakeData("totalRows", 6, totalRowsDesc);
+    auto idxCount = MakeData("idxCount", 7, idxCountDesc);
 
     ge::op::GetWeightByRank op("get_weight_by_rank");
     op.set_input_weight_r(weightR);
@@ -180,11 +198,12 @@ int main()
     op.set_input_getuserIds(getuserIds);
     op.set_input_getuserIdRank(getuserIdRank);
     op.set_input_totalRows(totalRows);
+    op.set_input_idxCount(idxCount);
     op.update_output_desc_weightout_r(outputDesc);
     op.update_output_desc_weightout_i(outputDesc);
 
     ge::Graph graph("single_get_weight_by_rank");
-    graph.SetInputs({weightR, weightI, getIdxs, lens, getuserIds, getuserIdRank, totalRows});
+    graph.SetInputs({weightR, weightI, getIdxs, lens, getuserIds, getuserIdRank, totalRows, idxCount});
     graph.SetOutputs({std::make_pair(op, std::vector<size_t>{0, 1})});
 
     std::map<std::string, std::string> options = {
@@ -212,6 +231,7 @@ int main()
     inputs.emplace_back(MakeTensor(userIdsDesc, "../input/input_user_ids.bin"));
     inputs.emplace_back(MakeTensor(ranksDesc, "../input/input_user_ranks.bin"));
     inputs.emplace_back(MakeTensor(totalRowsDesc, "../input/input_total_rows.bin"));
+    inputs.emplace_back(MakeTensor(idxCountDesc, "../input/input_idx_count.bin"));
 
     if (session.BuildGraph(0, inputs) != ge::SUCCESS) {
         std::cerr << "BuildGraph failed: " << ge::GEGetErrorMsg() << std::endl;

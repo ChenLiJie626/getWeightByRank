@@ -10,6 +10,7 @@ Inputs:
 - `getuserIds`: `uint32`, shape `[sum(lens)]`.
 - `getuserIdRank`: `uint32`, shape `[sum(lens)]`.
 - `totalRows`: `uint32`, shape `[totalOutputRows]`. Its first-dimension length is the exact first dimension of the two outputs; its values are not read by the operator.
+- `idxCount`: `uint32`, shape `[1]`. The kernel reads `idxCount[0]` as the number of valid entries to consume from `getIdxs` and `lens`.
 
 Outputs:
 
@@ -19,7 +20,7 @@ Shape/type inference:
 
 - Output dtypes follow `weight_r` and `weight_i` and are inferred as `float`.
 - The op infers output shape as `[shape(totalRows)[0], 256]`.
-- `lens`, `getuserIdRank`, and `totalRows` are normal runtime tensor inputs; no input is declared value-dependent.
+- `lens`, `getuserIdRank`, `totalRows`, and `idxCount` are normal runtime tensor inputs; no input is declared value-dependent.
 - `totalOutputRows = 8 * sum(sum(clamp(getuserIdRank[sum(lens[:i]):sum(lens[:i + 1])], 0, 8)) for i in range(idxCount))`.
 
 For idx group `i`, user entry `k`, and local index `t` in `[0, 7]`, `getuserIdRank[user_offset + k]` is the number of leading rank columns to copy for that user. These columns are concatenated from column `0` inside each idx group:
@@ -39,7 +40,8 @@ for r in range(getuserIdRank[user_offset + k]):
 
 Implementation notes:
 
-- The host tiling launches up to `DEFAULT_BLOCK_DIM` vector blocks, capped by `idxCount * 8`.
+- The host tiling launches `DEFAULT_BLOCK_DIM` vector blocks; the kernel reads `idxCount` from GM and loops over `idxCount * 8` destination slices.
+- `idxCount` and `totalUserEntries` are not stored in tiling data. The kernel reads `idxCount` from GM and computes user/rank offsets by summing `lens`.
 - Each block owns complete `dstIndex` slices, so blocks never write the same output region.
 - For every owned `dstIndex`, the kernel writes the current local index's actual concatenated rank rows into the flat `[totalOutputRows, 256]` output. Because each rank block is contiguous, it copies each user's selected rank block with one aligned `DataCopy` per real/imag tensor.
 

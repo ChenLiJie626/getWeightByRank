@@ -98,6 +98,7 @@ def main() -> None:
     GET_USER_IDS.tofile("input/input_user_ids.bin")
     GET_USER_RANKS.tofile("input/input_user_ranks.bin")
     np.zeros(TOTAL_OUTPUT_ROWS, dtype=np.uint32).tofile("input/input_total_rows.bin")
+    np.array([len(GET_IDXS)], dtype=np.uint32).tofile("input/input_idx_count.bin")
 
     build_golden(weight_r).tofile("output/golden_weightout_r.bin")
     build_golden(weight_i).tofile("output/golden_weightout_i.bin")

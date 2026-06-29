@@ -34,9 +34,9 @@ UINT32 InferShapeFailed(const std::string &reason)
     return ge::GRAPH_FAILED;
 }
 
-bool CheckVectorShape(const gert::Shape &shape, int64_t len)
+bool CheckScalarShape(const gert::Shape &shape)
 {
-    return shape.GetDimNum() == 1 && shape.GetDim(0) == len;
+    return shape.GetDimNum() == 1 && shape.GetDim(0) == 1;
 }
 
 bool CheckWeightShape(const gert::Shape &shape)
@@ -102,6 +102,7 @@ UINT32 InferShapeFunc(gert::InferShapeContext *context)
     const gert::Shape *userIdsShape = context->GetInputShape(4);
     const gert::Shape *ranksShape = context->GetInputShape(5);
     const gert::Shape *totalRowsShape = context->GetInputShape(6);
+    const gert::Shape *idxCountShape = context->GetInputShape(7);
     gert::Shape *outRShape = context->GetOutputShape(0);
     gert::Shape *outIShape = context->GetOutputShape(1);
     if (weightRShape == nullptr) {
@@ -125,6 +126,9 @@ UINT32 InferShapeFunc(gert::InferShapeContext *context)
     if (totalRowsShape == nullptr) {
         return InferShapeFailed("input totalRows shape is null");
     }
+    if (idxCountShape == nullptr) {
+        return InferShapeFailed("input idxCount shape is null");
+    }
     if (outRShape == nullptr) {
         return InferShapeFailed("output weightout_r shape is null");
     }
@@ -143,10 +147,9 @@ UINT32 InferShapeFunc(gert::InferShapeContext *context)
         return InferShapeFailed("getIdxs shape must be one-dimensional with positive length, got " +
                                 ShapeToString(idxsShape));
     }
-    const int64_t idxCount = idxsShape->GetDim(0);
-    if (!CheckVectorShape(*lensShape, idxCount)) {
-        return InferShapeFailed("lens shape must be [idxCount], idxCount=" + std::to_string(idxCount) +
-                                ", got " + ShapeToString(lensShape));
+    if (lensShape->GetDimNum() != 1 || lensShape->GetDim(0) <= 0) {
+        return InferShapeFailed("lens shape must be one-dimensional with positive length, got " +
+                                ShapeToString(lensShape));
     }
     if (userIdsShape->GetDimNum() != 1) {
         return InferShapeFailed("getuserIds shape must be one-dimensional, got " + ShapeToString(userIdsShape));
@@ -154,15 +157,14 @@ UINT32 InferShapeFunc(gert::InferShapeContext *context)
     if (ranksShape->GetDimNum() != 1) {
         return InferShapeFailed("getuserIdRank shape must be one-dimensional, got " + ShapeToString(ranksShape));
     }
-    if (userIdsShape->GetDim(0) != ranksShape->GetDim(0)) {
-        return InferShapeFailed("getuserIds and getuserIdRank must have the same length. getuserIds=" +
-                                ShapeToString(userIdsShape) + ", getuserIdRank=" + ShapeToString(ranksShape));
-    }
 
     int64_t totalOutputRows = 0;
     if (!GetTotalRowsFromShape(*totalRowsShape, totalOutputRows)) {
         return InferShapeFailed("totalRows shape must be one-dimensional with positive length, got " +
                                 ShapeToString(totalRowsShape));
+    }
+    if (!CheckScalarShape(*idxCountShape)) {
+        return InferShapeFailed("idxCount shape must be [1], got " + ShapeToString(idxCountShape));
     }
 
     *outRShape = gert::Shape({totalOutputRows, ROWS});
@@ -198,6 +200,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     auto userIdsShape = context->GetInputTensor(4)->GetOriginShape();
     auto ranksShape = context->GetInputTensor(5)->GetOriginShape();
     auto totalRowsShape = context->GetInputTensor(6)->GetOriginShape();
+    auto idxCountShape = context->GetInputTensor(7)->GetOriginShape();
     auto outRStorageShape = context->GetOutputShape(0);
     auto outIStorageShape = context->GetOutputShape(1);
     if (outRStorageShape == nullptr || outIStorageShape == nullptr) {
@@ -213,15 +216,10 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
         return ge::GRAPH_FAILED;
     }
     const int64_t userCount = weightRShape.GetDim(0) / INDEX_COUNT;
-    const int64_t idxCount = idxsShape.GetDim(0);
-    if (!CheckVectorShape(lensShape, idxCount) ||
+    if (lensShape.GetDimNum() != 1 || lensShape.GetDim(0) <= 0 ||
         userIdsShape.GetDimNum() != 1 ||
         ranksShape.GetDimNum() != 1 ||
-        userIdsShape.GetDim(0) != ranksShape.GetDim(0)) {
-        return ge::GRAPH_FAILED;
-    }
-    const int64_t totalUserEntries = userIdsShape.GetDim(0);
-    if (totalUserEntries < 0) {
+        !CheckScalarShape(idxCountShape)) {
         return ge::GRAPH_FAILED;
     }
     if (!CheckOutputShape(outRShape) || !CheckSameOutputShape(outRShape, outIShape)) {
@@ -236,16 +234,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
 
     GetWeightByRankTilingData tiling;
     tiling.set_userCount(static_cast<uint32_t>(userCount));
-    tiling.set_idxCount(static_cast<uint32_t>(idxCount));
-    tiling.set_totalUserEntries(static_cast<uint32_t>(totalUserEntries));
     tiling.set_totalOutputRows(static_cast<uint32_t>(totalOutputRows));
 
-    const uint64_t dstCount = static_cast<uint64_t>(idxCount) * INDEX_GROUP_WIDTH;
-    uint32_t blockDim = DEFAULT_BLOCK_DIM;
-    if (dstCount > 0 && dstCount < DEFAULT_BLOCK_DIM) {
-        blockDim = static_cast<uint32_t>(dstCount);
-    }
-    context->SetBlockDim(blockDim);
+    context->SetBlockDim(DEFAULT_BLOCK_DIM);
     context->SetTilingKey(0);
 
     tiling.SaveToBuffer(context->GetRawTilingData()->GetData(),
@@ -288,6 +279,10 @@ public:
             .DataType({ge::DT_UINT32})
             .Format({ge::FORMAT_ND});
         this->Input("totalRows")
+            .ParamType(REQUIRED)
+            .DataType({ge::DT_UINT32})
+            .Format({ge::FORMAT_ND});
+        this->Input("idxCount")
             .ParamType(REQUIRED)
             .DataType({ge::DT_UINT32})
             .Format({ge::FORMAT_ND});

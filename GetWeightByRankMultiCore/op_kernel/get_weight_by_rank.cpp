@@ -69,21 +69,15 @@ __aicore__ inline float GetRankScale(uint32_t rankCount)
 }
 
 __aicore__ inline void AdvanceToGroup(__gm__ uint32_t *lensGm, __gm__ uint32_t *ranksGm,
-                                      uint32_t groupCount, uint32_t totalUserEntries,
+                                      uint32_t groupCount,
                                       uint32_t &userOffset, uint32_t &groupRowOffset)
 {
     userOffset = 0;
     groupRowOffset = 0;
     for (uint32_t i = 0; i < groupCount; ++i) {
         const uint32_t currentLen = lensGm[i];
-        const uint32_t remaining = userOffset < totalUserEntries ? totalUserEntries - userOffset : 0;
-        const uint32_t availableLen = currentLen < remaining ? currentLen : remaining;
-        for (uint32_t k = 0; k < availableLen; ++k) {
+        for (uint32_t k = 0; k < currentLen; ++k) {
             groupRowOffset += GetRankCount(ranksGm[userOffset + k]);
-        }
-        if (currentLen >= remaining) {
-            userOffset = totalUserEntries;
-            return;
         }
         userOffset += currentLen;
     }
@@ -121,8 +115,7 @@ __aicore__ inline void ProcessDstIndex(GlobalTensor<float> &weightR, GlobalTenso
                                        GM_ADDR getUserIds, GM_ADDR getUserIdRank,
                                        GlobalTensor<float> &outR, GlobalTensor<float> &outI,
                                        TBuf<> &tmpRBuf, TBuf<> &tmpIBuf,
-                                       uint32_t userCount, uint32_t totalUserEntries,
-                                       uint32_t dstIndex)
+                                       uint32_t userCount, uint32_t dstIndex)
 {
     auto idxsGm = reinterpret_cast<__gm__ uint32_t *>(getIdxs);
     auto lensGm = reinterpret_cast<__gm__ uint32_t *>(lens);
@@ -137,13 +130,11 @@ __aicore__ inline void ProcessDstIndex(GlobalTensor<float> &weightR, GlobalTenso
 
     uint32_t userOffset = 0;
     uint32_t groupRowOffset = 0;
-    AdvanceToGroup(lensGm, ranksGm, groupIndex, totalUserEntries, userOffset, groupRowOffset);
+    AdvanceToGroup(lensGm, ranksGm, groupIndex, userOffset, groupRowOffset);
     uint32_t outputColOffset = 0;
 
     const uint32_t currentLen = lensGm[groupIndex];
-    const uint32_t remaining = userOffset < totalUserEntries ? totalUserEntries - userOffset : 0;
-    const uint32_t availableLen = currentLen < remaining ? currentLen : remaining;
-    const uint32_t currentGroupRows = GetCurrentGroupRows(ranksGm, userOffset, availableLen);
+    const uint32_t currentGroupRows = GetCurrentGroupRows(ranksGm, userOffset, currentLen);
     const uint64_t baseDstRow =
         (static_cast<uint64_t>(groupRowOffset) * INDEX_GROUP_WIDTH) +
         (static_cast<uint64_t>(localIndex) * currentGroupRows);
@@ -154,7 +145,7 @@ __aicore__ inline void ProcessDstIndex(GlobalTensor<float> &weightR, GlobalTenso
     }
     const uint32_t srcIndex = idxGroup * INDEX_GROUP_WIDTH + localIndex;
 
-    for (uint32_t k = 0; k < availableLen; ++k) {
+    for (uint32_t k = 0; k < currentLen; ++k) {
         const uint32_t userId = userIdsGm[userOffset + k];
         const uint32_t rankCount = GetRankCount(ranksGm[userOffset + k]);
         const uint32_t remainingCols =
@@ -190,7 +181,7 @@ __aicore__ inline void ProcessDstIndex(GlobalTensor<float> &weightR, GlobalTenso
 extern "C" __global__ __aicore__ void get_weight_by_rank(GM_ADDR weight_r, GM_ADDR weight_i,
                                                           GM_ADDR getIdxs, GM_ADDR lens,
                                                           GM_ADDR getuserIds, GM_ADDR getuserIdRank,
-                                                          GM_ADDR totalRows,
+                                                          GM_ADDR totalRows, GM_ADDR idxCount,
                                                           GM_ADDR weightout_r, GM_ADDR weightout_i,
                                                           GM_ADDR workspace, GM_ADDR tiling)
 {
@@ -202,6 +193,7 @@ extern "C" __global__ __aicore__ void get_weight_by_rank(GM_ADDR weight_r, GM_AD
     (void)getuserIds;
     (void)getuserIdRank;
     (void)totalRows;
+    (void)idxCount;
     (void)weightout_r;
     (void)weightout_i;
     (void)workspace;
@@ -214,10 +206,10 @@ extern "C" __global__ __aicore__ void get_weight_by_rank(GM_ADDR weight_r, GM_AD
     using namespace GetWeightByRankKernel;
 
     const uint32_t userCount = tilingData.userCount;
-    const uint32_t idxCount = tilingData.idxCount;
-    const uint32_t totalUserEntries = tilingData.totalUserEntries;
+    auto idxCountGm = reinterpret_cast<__gm__ uint32_t *>(idxCount);
+    const uint32_t idxCountValue = idxCountGm[0];
     const uint32_t totalOutputRows = tilingData.totalOutputRows;
-    if (userCount == 0 || idxCount == 0) {
+    if (userCount == 0 || idxCountValue == 0) {
         return;
     }
 
@@ -240,11 +232,11 @@ extern "C" __global__ __aicore__ void get_weight_by_rank(GM_ADDR weight_r, GM_AD
 
     const uint32_t blockIdx = static_cast<uint32_t>(GetBlockIdx());
     const uint32_t blockNum = static_cast<uint32_t>(GetAivBlockNum());
-    const uint32_t dstCount = idxCount * INDEX_GROUP_WIDTH;
-    for (uint32_t dstIndex = blockIdx; dstIndex < dstCount; dstIndex += blockNum) {
+    const uint64_t dstCount = static_cast<uint64_t>(idxCountValue) * INDEX_GROUP_WIDTH;
+    for (uint64_t dstIndex = blockIdx; dstIndex < dstCount; dstIndex += blockNum) {
         ProcessDstIndex(weightRGm, weightIGm, getIdxs, lens, getuserIds, getuserIdRank,
                         outRGm, outIGm, tmpRBuf, tmpIBuf,
-                        userCount, totalUserEntries, dstIndex);
+                        userCount, static_cast<uint32_t>(dstIndex));
     }
 #endif
 }

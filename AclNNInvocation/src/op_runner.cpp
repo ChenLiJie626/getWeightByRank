@@ -316,7 +316,7 @@ bool OpRunner::RunOp()
     aclOpExecutor *handle = nullptr;
     auto ret = aclnnGetWeightByRankGetWorkspaceSize(inputTensor_[0], inputTensor_[1], inputTensor_[2],
                                                     inputTensor_[3], inputTensor_[4], inputTensor_[5],
-                                                    inputTensor_[6],
+                                                    inputTensor_[6], inputTensor_[7],
                                                     outputTensor_[0], outputTensor_[1],
                                                     &workspaceSize, &handle);
     if (ret != ACL_SUCCESS) {
