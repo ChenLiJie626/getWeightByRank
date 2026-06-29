@@ -1,6 +1,9 @@
 #include "get_weight_by_rank_tiling.h"
 
 #include <cstddef>
+#include <iostream>
+#include <sstream>
+#include <string>
 
 #include "register/op_def_registry.h"
 #include "tiling/platform/platform_ascendc.h"
@@ -8,6 +11,29 @@
 using namespace GetWeightByRankConst;
 
 namespace {
+std::string ShapeToString(const gert::Shape *shape)
+{
+    if (shape == nullptr) {
+        return "<null>";
+    }
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < shape->GetDimNum(); ++i) {
+        oss << shape->GetDim(i);
+        if (i + 1 != shape->GetDimNum()) {
+            oss << ", ";
+        }
+    }
+    oss << "]";
+    return oss.str();
+}
+
+UINT32 InferShapeFailed(const std::string &reason)
+{
+    std::cerr << "[GetWeightByRank][InferShape] " << reason << std::endl;
+    return ge::GRAPH_FAILED;
+}
+
 bool CheckVectorShape(const gert::Shape &shape, int64_t len)
 {
     return shape.GetDimNum() == 1 && shape.GetDim(0) == len;
@@ -67,7 +93,7 @@ bool CheckSameOutputShape(const gert::Shape &lhs, const gert::Shape &rhs)
 UINT32 InferShapeFunc(gert::InferShapeContext *context)
 {
     if (context == nullptr) {
-        return ge::GRAPH_FAILED;
+        return InferShapeFailed("context is null");
     }
     const gert::Shape *weightRShape = context->GetInputShape(0);
     const gert::Shape *weightIShape = context->GetInputShape(1);
@@ -78,27 +104,65 @@ UINT32 InferShapeFunc(gert::InferShapeContext *context)
     const gert::Shape *totalRowsShape = context->GetInputShape(6);
     gert::Shape *outRShape = context->GetOutputShape(0);
     gert::Shape *outIShape = context->GetOutputShape(1);
-    if (weightRShape == nullptr || weightIShape == nullptr || idxsShape == nullptr ||
-        lensShape == nullptr || userIdsShape == nullptr || ranksShape == nullptr ||
-        totalRowsShape == nullptr ||
-        outRShape == nullptr || outIShape == nullptr) {
-        return ge::GRAPH_FAILED;
+    if (weightRShape == nullptr) {
+        return InferShapeFailed("input weight_r shape is null");
     }
-    if (!CheckWeightShape(*weightRShape) || !CheckSameWeightShape(*weightRShape, *weightIShape) ||
-        idxsShape->GetDimNum() != 1 || idxsShape->GetDim(0) <= 0) {
-        return ge::GRAPH_FAILED;
+    if (weightIShape == nullptr) {
+        return InferShapeFailed("input weight_i shape is null");
+    }
+    if (idxsShape == nullptr) {
+        return InferShapeFailed("input getIdxs shape is null");
+    }
+    if (lensShape == nullptr) {
+        return InferShapeFailed("input lens shape is null");
+    }
+    if (userIdsShape == nullptr) {
+        return InferShapeFailed("input getuserIds shape is null");
+    }
+    if (ranksShape == nullptr) {
+        return InferShapeFailed("input getuserIdRank shape is null");
+    }
+    if (totalRowsShape == nullptr) {
+        return InferShapeFailed("input totalRows shape is null");
+    }
+    if (outRShape == nullptr) {
+        return InferShapeFailed("output weightout_r shape is null");
+    }
+    if (outIShape == nullptr) {
+        return InferShapeFailed("output weightout_i shape is null");
+    }
+    if (!CheckWeightShape(*weightRShape)) {
+        return InferShapeFailed("weight_r shape must be [userCount * 136, 8, 256] with userCount > 0, got " +
+                                ShapeToString(weightRShape));
+    }
+    if (!CheckSameWeightShape(*weightRShape, *weightIShape)) {
+        return InferShapeFailed("weight_i shape must equal weight_r shape. weight_r=" +
+                                ShapeToString(weightRShape) + ", weight_i=" + ShapeToString(weightIShape));
+    }
+    if (idxsShape->GetDimNum() != 1 || idxsShape->GetDim(0) <= 0) {
+        return InferShapeFailed("getIdxs shape must be one-dimensional with positive length, got " +
+                                ShapeToString(idxsShape));
     }
     const int64_t idxCount = idxsShape->GetDim(0);
-    if (!CheckVectorShape(*lensShape, idxCount) ||
-        userIdsShape->GetDimNum() != 1 ||
-        ranksShape->GetDimNum() != 1 ||
-        userIdsShape->GetDim(0) != ranksShape->GetDim(0)) {
-        return ge::GRAPH_FAILED;
+    if (!CheckVectorShape(*lensShape, idxCount)) {
+        return InferShapeFailed("lens shape must be [idxCount], idxCount=" + std::to_string(idxCount) +
+                                ", got " + ShapeToString(lensShape));
+    }
+    if (userIdsShape->GetDimNum() != 1) {
+        return InferShapeFailed("getuserIds shape must be one-dimensional, got " + ShapeToString(userIdsShape));
+    }
+    if (ranksShape->GetDimNum() != 1) {
+        return InferShapeFailed("getuserIdRank shape must be one-dimensional, got " + ShapeToString(ranksShape));
+    }
+    if (userIdsShape->GetDim(0) != ranksShape->GetDim(0)) {
+        return InferShapeFailed("getuserIds and getuserIdRank must have the same length. getuserIds=" +
+                                ShapeToString(userIdsShape) + ", getuserIdRank=" + ShapeToString(ranksShape));
     }
 
     int64_t totalOutputRows = 0;
     if (!GetTotalRowsFromShape(*totalRowsShape, totalOutputRows)) {
-        return ge::GRAPH_FAILED;
+        return InferShapeFailed("totalRows shape must be one-dimensional with positive length, got " +
+                                ShapeToString(totalRowsShape));
     }
 
     *outRShape = gert::Shape({totalOutputRows, ROWS});
